@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const { v4: uuidv4 } = require("uuid");
-const Database = require("better-sqlite3");
+const sqlite3 = require("sqlite3").verbose();
 const vision = require("@google-cloud/vision");
 const path = require("path");
 const fs = require("fs");
@@ -12,29 +12,33 @@ app.use(cors());
 app.use(express.json());
 
 // ===============================
-// SQLite Setup
+// SQLite Setup (sqlite3)
 // ===============================
-const db = new Database("./data/quotes.db");
+const db = new sqlite3.Database("./data/quotes.db");
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS quotes (
-  id TEXT PRIMARY KEY,
-  address TEXT,
-  height REAL,
-  window_count INTEGER,
-  price REAL,
-  created_at TEXT
-);
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS quotes (
+      id TEXT PRIMARY KEY,
+      address TEXT,
+      height REAL,
+      window_count INTEGER,
+      price REAL,
+      created_at TEXT
+    )
+  `);
 
-CREATE TABLE IF NOT EXISTS gutter_quotes (
-  id TEXT PRIMARY KEY,
-  address TEXT,
-  linear_feet REAL,
-  stories INTEGER,
-  price REAL,
-  created_at TEXT
-);
-`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS gutter_quotes (
+      id TEXT PRIMARY KEY,
+      address TEXT,
+      linear_feet REAL,
+      stories INTEGER,
+      price REAL,
+      created_at TEXT
+    )
+  `);
+});
 
 // ===============================
 // Uploads
@@ -84,7 +88,7 @@ async function detectWindows(imagePath) {
 // API ROUTES
 // ===============================
 
-// Analyze building
+// Analyze building image
 app.post("/api/analyze-image", upload.single("file"), async (req, res) => {
   const filePath = path.join(__dirname, req.file.path);
   const windows = await detectWindows(filePath);
@@ -101,15 +105,16 @@ app.post("/api/quote", (req, res) => {
   const id = uuidv4();
   const created_at = new Date().toISOString();
 
-  db.prepare(`
-    INSERT INTO quotes (id, address, height, window_count, price, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, address, height, windowCount, price, created_at);
+  db.run(
+    `INSERT INTO quotes (id, address, height, window_count, price, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, address, height, windowCount, price, created_at]
+  );
 
   res.json({ success: true, id });
 });
 
-// Gutter quote
+// Save gutter quote
 app.post("/api/gutter-quote", (req, res) => {
   const { address, linearFeet, stories } = req.body;
 
@@ -118,34 +123,4 @@ app.post("/api/gutter-quote", (req, res) => {
   const price = linearFeet * baseRate * multiplier;
 
   const id = uuidv4();
-  const created_at = new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO gutter_quotes (id, address, linear_feet, stories, price, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, address, linearFeet, stories, price, created_at);
-
-  res.json({ id, address, linearFeet, stories, price, created_at });
-});
-
-// History endpoints
-app.get("/api/quotes", (req, res) => {
-  res.json(
-    db.prepare("SELECT * FROM quotes ORDER BY created_at DESC").all()
-  );
-});
-
-app.get("/api/gutter-quotes", (req, res) => {
-  res.json(
-    db.prepare("SELECT * FROM gutter_quotes ORDER BY created_at DESC").all()
-  );
-});
-
-// Health check
-app.get("/", (req, res) => {
-  res.json({ status: "Backend running", version: "1.0.0" });
-});
-
-// Start
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log("Backend running on port", PORT));
+  const created_at = new Date().
