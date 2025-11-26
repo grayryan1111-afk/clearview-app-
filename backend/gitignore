@@ -1,4 +1,4 @@
-node_modules/
-uploads/
-data/
-google-credentials.json
+node_modules
+npm-debug.log
+uploads
+data
